@@ -169,11 +169,11 @@ for model_name, pipeline in pipelines.items():
     y_test_pred = pipeline.predict(X_test)
     
     print(f"Test R²: {r2_score(y_test, y_test_pred):.4f}")
-    print(f"Test RMSE: {mean_squared_error(y_test, y_test_pred, squared=False):.4f}")
+    print(f"Test RMSE: {np.sqrt(mean_squared_error(y_test, y_test_pred)):.4f}")
 
 
 # -------------------
-# 7. Evaluate all models
+# 6. Evaluate all models
 # -------------------
 
 pipelines = {
@@ -223,7 +223,7 @@ for model_name, pipeline in pipelines.items():
         ('Test', y_test, y_test_pred)
     ]:
         r2 = r2_score(y_true, y_pred)
-        rmse = mean_squared_error(y_true, y_pred, squared=False)
+        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         mae = mean_absolute_error(y_true, y_pred)
         
         results.append({
@@ -259,7 +259,7 @@ print("="*80)
 print(results_df.pivot(index='Model', columns='Set', values='MAE').round(4))
 
 # -------------------
-# 8. Plot Actual vs Predicted Efficiency over Time
+# 7. Plot Actual vs Predicted Efficiency over Time
 # -------------------
 
 # Plot actual vs predicted for each model on TEST set
@@ -313,5 +313,87 @@ plt.title("Model Comparison: Actual vs Predicted Solar Panel Efficiency", fontsi
 plt.legend(fontsize=10, loc='best')
 plt.grid(True, alpha=0.3)
 plt.xticks(rotation=45, ha='right')
+plt.tight_layout()
+plt.show()
+
+# -------------------
+# 8. Feature Importance Analysis with Plot
+# -------------------
+
+print("\n" + "="*80)
+print("FEATURE IMPORTANCE ANALYSIS")
+print("="*80)
+
+# Get the trained models from pipelines (already trained in section 6)
+trained_models = {}
+for model_name, pipeline in pipelines.items():
+    trained_models[model_name] = pipeline
+
+# 1. Correlation Analysis with Efficiency 
+print("\n" + "-"*80)
+print("Correlation Analysis: Features vs Efficiency")
+print("-"*80)
+print("(Negative correlation = feature contributes to efficiency degradation)")
+print("-"*80)
+
+# Measures the linear relationship between each feature and efficiency.
+correlations = model_df[feature_cols + ['EFFICIENCY']].corr()['EFFICIENCY'].drop('EFFICIENCY')
+correlations = correlations.reindex(correlations.abs().sort_values(ascending=False).index)
+
+for feature, corr in correlations.items():
+    direction = "↓ DEGRADATION" if corr < 0 else "↑ EFFICIENCY"
+    print(f"  {feature:20s}: {corr:7.4f}  {direction}")
+
+# 2. Average Feature Importance from Tree-Based Models (most reliable)
+rf_model = trained_models['Random Forest'].named_steps['model']
+gb_model = trained_models['Gradient Boosting'].named_steps['model']
+
+rf_importance = pd.Series(rf_model.feature_importances_, index=feature_cols)
+gb_importance = pd.Series(gb_model.feature_importances_, index=feature_cols)
+
+avg_importance = (rf_importance + gb_importance) / 2
+avg_importance = avg_importance.sort_values(ascending=False)
+
+print("\n" + "-"*80)
+print("Average Feature Importance (Random Forest + Gradient Boosting)")
+print("-"*80)
+print("(Higher value = feature has more impact on efficiency prediction)")
+print("-"*80)
+
+for feature, importance in avg_importance.items():
+    print(f"  {feature:20s}: {importance:7.4f}")
+
+# 3. Summary: Top features contributing to degradation
+print("\n" + "="*80)
+print("SUMMARY: Features Contributing to Efficiency Degradation")
+print("="*80)
+
+degradation_features = correlations[correlations < 0].sort_values()
+if len(degradation_features) > 0:
+    print("\nFeatures with NEGATIVE correlation (contribute to degradation):")
+    for feature, corr in degradation_features.items():
+        print(f"  {feature:20s}: {corr:7.4f}")
+else:
+    print("\nNo features show negative correlation with efficiency.")
+
+# 4. Visualize: Combined Feature Importance
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+# Correlation plot
+ax = axes[0]
+colors_corr = ['red' if x < 0 else 'green' for x in correlations.values]
+ax.barh(correlations.index, correlations.values, color=colors_corr, alpha=0.7)
+ax.axvline(x=0, color='black', linestyle='--', linewidth=0.8)
+ax.set_xlabel('Correlation Coefficient', fontsize=11)
+ax.set_title('Correlation: Features vs Efficiency\n(Red=Degradation, Green=Efficiency)', fontsize=12, fontweight='bold')
+ax.grid(True, alpha=0.3, axis='x')
+
+# Average importance plot
+ax = axes[1]
+ax.barh(avg_importance.index, avg_importance.values, color='steelblue', alpha=0.7)
+ax.set_xlabel('Average Importance Score', fontsize=11)
+ax.set_title('Average Feature Importance\n(Random Forest + Gradient Boosting)', fontsize=12, fontweight='bold')
+ax.grid(True, alpha=0.3, axis='x')
+
 plt.tight_layout()
 plt.show()
