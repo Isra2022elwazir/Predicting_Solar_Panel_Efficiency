@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
 # -------------------
@@ -78,10 +80,9 @@ df_30min.to_csv(out_csv, index=True)
 print(f"Saved engineered dataset -> {out_csv}")
 
 # -------------------
-# 4. Prepare data for Linear Regression (chronological split + scaling)
+# 4. Prepare data for all models
 # -------------------
 
-# Clean infinities and NaNs (can appear from POWER_RATIO or EFFICIENCY)
 model_df = df_30min.replace([np.inf, -np.inf], np.nan).dropna(
     subset=[
         "EFFICIENCY",
@@ -111,79 +112,206 @@ feature_cols = [
 X = model_df[feature_cols]
 y = model_df["EFFICIENCY"]
 
-print( 'effeceincy: ', df_30min["EFFICIENCY"].describe())
+print('effeciency:', model_df["EFFICIENCY"].describe())
 
 
-# Chronological 80/20 split
+# Sequential split - used for time series data
+
 n_samples = len(model_df)
-split_idx = int(n_samples * 0.8)
+train_idx = int(n_samples * 0.7)  # 70% for training
+val_idx = int(n_samples * 0.85)   # 15% for validation (70% + 15% = 85%)
+                                   # Remaining 15% for test
 
-X_train = X.iloc[:split_idx]
-X_test = X.iloc[split_idx:]
-y_train = y.iloc[:split_idx]
-y_test = y.iloc[split_idx:]
+X_train = X.iloc[:train_idx]
+X_val = X.iloc[train_idx:val_idx]
+X_test = X.iloc[val_idx:]
 
-print(f"Total samples: {n_samples}, Train: {len(X_train)}, Test: {len(X_test)}")
+y_train = y.iloc[:train_idx]
+y_val = y.iloc[train_idx:val_idx]
+y_test = y.iloc[val_idx:]
 
-# Standardize features (fit on train, transform both)
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+print(f"Total samples: {n_samples}")
+print(f"Train: {len(X_train)} ({len(X_train)/n_samples*100:.1f}%)")
+print(f"Validation: {len(X_val)} ({len(X_val)/n_samples*100:.1f}%)")
+print(f"Test: {len(X_test)} ({len(X_test)/n_samples*100:.1f}%)")
 
-# -------------------
-# 5. Train Linear Regression
-# -------------------
-
-lr_model = LinearRegression()
-lr_model.fit(X_train_scaled, y_train)
-
-# Predict on test set
-y_pred = lr_model.predict(X_test_scaled)
+print('\nEfficiency Statistics:')
+print(f"Train - Mean: {y_train.mean():.4f}, Std: {y_train.std():.4f}")
+print(f"Val   - Mean: {y_val.mean():.4f}, Std: {y_val.std():.4f}")
+print(f"Test  - Mean: {y_test.mean():.4f}, Std: {y_test.std():.4f}")
 
 # -------------------
-# 6. Evaluation metrics
+# 5. Train all models
 # -------------------
 
-mae = mean_absolute_error(y_test, y_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-r2 = r2_score(y_test, y_pred)
+# Create pipelines that include scaling
+pipelines = {
+    'Linear Regression': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', LinearRegression())
+    ]),
+    'Random Forest': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', RandomForestRegressor(n_estimators=100, random_state=42))
+    ]),
+    'Gradient Boosting': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', GradientBoostingRegressor(n_estimators=100, random_state=42))
+    ])
+}
 
-print("\n=== Linear Regression (Chronological, with StandardScaler) ===")
-print(f"MAE  : {mae:.6f}")
-print(f"RMSE : {rmse:.6f}")
-print(f"R²   : {r2:.6f}")
+# Train and evaluate (use unscaled X data)
+for model_name, pipeline in pipelines.items():
+    print(f"\nTraining {model_name}...")
+    
+    pipeline.fit(X_train, y_train)  # Pipeline handles scaling
+    
+    y_test_pred = pipeline.predict(X_test)
+    
+    print(f"Test R²: {r2_score(y_test, y_test_pred):.4f}")
+    print(f"Test RMSE: {mean_squared_error(y_test, y_test_pred, squared=False):.4f}")
 
-# Coefficients (on standardized features)
-coef_table = pd.DataFrame(
-    {
-        "feature": feature_cols,
-        "coefficient": lr_model.coef_,
+
+# -------------------
+# 7. Evaluate all models
+# -------------------
+
+pipelines = {
+    'Linear Regression': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', LinearRegression())
+    ]),
+    'Random Forest': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', RandomForestRegressor(n_estimators=100, random_state=42))
+    ]),
+    'Gradient Boosting': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', GradientBoostingRegressor(n_estimators=100, random_state=42))
+    ])
+}
+
+# Store results and predictions
+results = []
+predictions = {}
+
+# Train and evaluate each model (use unscaled X data)
+for model_name, pipeline in pipelines.items():
+    print(f"\n{'='*60}")
+    print(f"Training {model_name}...")
+    print('='*60)
+    
+    # Fit pipeline
+    pipeline.fit(X_train, y_train)
+    
+    # Predict on all sets
+    y_train_pred = pipeline.predict(X_train)
+    y_val_pred = pipeline.predict(X_val)
+    y_test_pred = pipeline.predict(X_test)
+    
+    # Store predictions for plotting
+    predictions[model_name] = {
+        'train': y_train_pred,
+        'val': y_val_pred,
+        'test': y_test_pred
     }
-)
-print("\nLinear Regression Coefficients (standardized features):")
-print(coef_table)
+    
+    # Calculate metrics for each set
+    for set_name, y_true, y_pred in [
+        ('Train', y_train, y_train_pred),
+        ('Validation', y_val, y_val_pred),
+        ('Test', y_test, y_test_pred)
+    ]:
+        r2 = r2_score(y_true, y_pred)
+        rmse = mean_squared_error(y_true, y_pred, squared=False)
+        mae = mean_absolute_error(y_true, y_pred)
+        
+        results.append({
+            'Model': model_name,
+            'Set': set_name,
+            'R²': r2,
+            'RMSE': rmse,
+            'MAE': mae
+        })
+        
+        print(f"\n{set_name} Set:")
+        print(f"  R² Score: {r2:.4f}")
+        print(f"  RMSE: {rmse:.4f}")
+        print(f"  MAE: {mae:.4f}")
+
+# Create results DataFrame for easy comparison
+results_df = pd.DataFrame(results)
+
+# Display summary tables
+print("\n" + "="*80)
+print("SUMMARY - R² Scores:")
+print("="*80)
+print(results_df.pivot(index='Model', columns='Set', values='R²').round(4))
+
+print("\n" + "="*80)
+print("SUMMARY - RMSE:")
+print("="*80)
+print(results_df.pivot(index='Model', columns='Set', values='RMSE').round(4))
+
+print("\n" + "="*80)
+print("SUMMARY - MAE:")
+print("="*80)
+print(results_df.pivot(index='Model', columns='Set', values='MAE').round(4))
 
 # -------------------
-# 7. Plot Actual vs Predicted Efficiency over Time
+# 8. Plot Actual vs Predicted Efficiency over Time
 # -------------------
 
-y_pred_series = pd.Series(y_pred, index=y_test.index)
+# Plot actual vs predicted for each model on TEST set
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-plt.figure(figsize=(14, 6))
-plt.plot(y_test.index, y_test, label="Actual Efficiency", linewidth=2)
-plt.plot(y_pred_series.index, y_pred_series, label="Predicted Efficiency", linestyle="--", linewidth=2)
+for idx, (model_name, preds) in enumerate(predictions.items()):
+    ax = axes[idx]
+    
+    # Get test predictions
+    y_test_pred = preds['test']
+    y_pred_series = pd.Series(y_test_pred, index=y_test.index)
+    
+    # Plot
+    ax.plot(y_test.index, y_test, label="Actual", linewidth=1.5, alpha=0.8)
+    ax.plot(y_pred_series.index, y_pred_series, label="Predicted", 
+            linestyle="--", linewidth=1.5, alpha=0.8)
+    
+    # Get metrics for title
+    test_results = results_df[(results_df['Model'] == model_name) & 
+                              (results_df['Set'] == 'Test')]
+    r2 = test_results['R²'].values[0]
+    rmse = test_results['RMSE'].values[0]
+    
+    ax.set_title(f"{model_name}\nR²={r2:.4f}, RMSE={rmse:.4f}", fontsize=12)
+    ax.set_xlabel("Time", fontsize=10)
+    ax.set_ylabel("Efficiency", fontsize=10)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(axis='x', rotation=45)
 
-plt.xlabel("Time")
-plt.ylabel("Efficiency")
-plt.title("Actual vs Predicted Solar Panel Efficiency Over Time")
-
-# --- Format x-axis for date + hour ---
-plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=6))  # show every 6 hours
-
-plt.xticks(rotation=45)
-plt.legend()
-plt.grid(True)
 plt.tight_layout()
 plt.show()
 
+# Create a comparison plot - all models on one graph
+plt.figure(figsize=(14, 6))
+plt.plot(y_test.index, y_test, label="Actual Efficiency", 
+         linewidth=2, alpha=0.9, color='black')
+
+colors = ['blue', 'green', 'red']
+for idx, (model_name, preds) in enumerate(predictions.items()):
+    y_test_pred = preds['test']
+    y_pred_series = pd.Series(y_test_pred, index=y_test.index)
+    
+    plt.plot(y_pred_series.index, y_pred_series, 
+             label=f"{model_name}", 
+             linestyle="--", linewidth=1.5, alpha=0.7, color=colors[idx])
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Efficiency", fontsize=12)
+plt.title("Model Comparison: Actual vs Predicted Solar Panel Efficiency", fontsize=14)
+plt.legend(fontsize=10, loc='best')
+plt.grid(True, alpha=0.3)
+plt.xticks(rotation=45, ha='right')
+plt.tight_layout()
+plt.show()
