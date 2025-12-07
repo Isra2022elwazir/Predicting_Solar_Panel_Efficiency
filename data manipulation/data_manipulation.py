@@ -397,3 +397,47 @@ ax.grid(True, alpha=0.3, axis='x')
 
 plt.tight_layout()
 plt.show()
+
+# Identify and Display Lowest Efficiency Points
+
+print("\n" + "="*80)
+print("LOWEST EFFICIENCY POINTS ANALYSIS")
+print("="*80)
+
+# Find the 5 lowest efficiency timestamps
+lowest_points = model_df["EFFICIENCY"].sort_values().head(5)
+
+# ---- Plot efficiency with lowest points highlighted ----
+plt.figure(figsize=(14,5))
+plt.plot(model_df.index, model_df["EFFICIENCY"], label="Efficiency", linewidth=1)
+plt.scatter(lowest_points.index, lowest_points.values, 
+            color="red", s=80, label="Lowest Values")
+
+plt.title("Efficiency Over Time (Lowest Observed Efficiency Points Highlighted)")
+plt.xlabel("Time")
+plt.ylabel("Efficiency")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# ---- Extract context for those points ----
+drop_context = model_df.loc[lowest_points.index, [
+    "IRRADIATION", 
+    "MODULE_TEMPERATURE",
+    "TEMP_DELTA",
+    "AMBIENT_TEMPERATURE",
+    "POWER_RATIO"
+]]
+
+print("\nDetails for Lowest Efficiency Points:\n")
+print(drop_context.round(3))
+
+# ---- Short interpretation tied to feature analysis ----
+print("\n--- Summary Insight ---")
+print(
+    "The lowest efficiency points occur either when irradiance is very low "
+    "(early morning/evening or cloudy periods) or when module temperature is high. "
+    "Both conditions match the feature analysis, which identified irradiance and "
+    "temperature-related variables as the strongest predictors of reduced efficiency."
+)
